@@ -3,87 +3,70 @@
 package main
 
 import (
-    "encoding/json"
-    "fmt"
     "log"
-    "io/ioutil"
     "net/http"
+    "fmt"
+    "os"
+    "os/exec"
+    "io"
+    "path/filepath"
+
 
     "github.com/gorilla/mux"
 )
 
-// Article - Our struct for all articles
-type Article struct {
-    Id      string    `json:"Id"`
-    Title   string `json:"Title"`
-    Desc    string `json:"desc"`
-    Content string `json:"content"`
-}
-
-var Articles []Article
-
-func homePage(w http.ResponseWriter, r *http.Request) {
-    fmt.Fprintf(w, "Welcome to the HomePage!")
-    fmt.Println("Endpoint Hit: homePage")
-}
-
-func returnAllArticles(w http.ResponseWriter, r *http.Request) {
-    fmt.Println("Endpoint Hit: returnAllArticles")
-    json.NewEncoder(w).Encode(Articles)
-}
-
-func returnSingleArticle(w http.ResponseWriter, r *http.Request) {
+// This is where we must upload the 
+// file and save it into a filder with
+// name = /videos/{video.uuid}/*.{mp4, mkv, ...}
+func uploadNewVideo(w http.ResponseWriter, r *http.Request) {
     vars := mux.Vars(r)
-    key := vars["id"]
+    uuid := vars["uuid"]
 
-    for _, article := range Articles {
-        if article.Id == key {
-            json.NewEncoder(w).Encode(article)
-        }
+    r.ParseMultipartForm(32 << 20)
+
+    file, handler, err := r.FormFile("file") // Retrieve the file from form data
+    if err != nil {
+        fmt.Printf("%+v\n", err)
     }
-}
+    defer file.Close()                       // Close the file when we finish
+    fmt.Printf("%+v\n%s", handler,uuid)
+    extension := filepath.Ext(handler.Filename)
 
 
-func createNewArticle(w http.ResponseWriter, r *http.Request) {
-    // get the body of our POST request
-    // unmarshal this into a new Article struct
-    // append this to our Articles array.    
-    reqBody, _ := ioutil.ReadAll(r.Body)
-    var article Article 
-    json.Unmarshal(reqBody, &article)
-    // update our global Articles array to include
-    // our new Article
-    Articles = append(Articles, article)
-
-    json.NewEncoder(w).Encode(article)
-}
-
-func deleteArticle(w http.ResponseWriter, r *http.Request) {
-    vars := mux.Vars(r)
-    id := vars["id"]
-
-    for index, article := range Articles {
-        if article.Id == id {
-            Articles = append(Articles[:index], Articles[index+1:]...)
-        }
+    // This is path which we want to store the file
+    f, err := os.OpenFile("/Users/amirhossiensorouri/Desktop/projects/stageshine/create-rest-api-in-go-tutorial/videos/"+uuid+extension, os.O_WRONLY|os.O_CREATE, 0666)
+    if err != nil {
+        fmt.Printf("%+v\n", err)
     }
 
+    // Copy the file to the destination path
+    io.Copy(f, file)
+    
+    // this is where we must run our script to 
+    // transcode our uploaded video into .m3u8 file.
+
+    cmd := exec.Command("/Users/amirhossiensorouri/Desktop/projects/stageshine/transcoder/transcoder", uuid+extension)
+    cmd.Stdout = os.Stdout
+    err = cmd.Start()
+    if err != nil {
+    log.Fatal(err)
+    }
+    log.Printf("Just ran subprocess %d, exiting\n", cmd.Process.Pid)
+
+    // done.
 }
 
 func handleRequests() {
+    addr := ":10000"
+
     myRouter := mux.NewRouter().StrictSlash(true)
-    myRouter.HandleFunc("/", homePage)
-    myRouter.HandleFunc("/articles", returnAllArticles)
-    myRouter.HandleFunc("/article", createNewArticle).Methods("POST")
-    myRouter.HandleFunc("/article/{id}", deleteArticle).Methods("DELETE")
-    myRouter.HandleFunc("/article/{id}", returnSingleArticle)
+
+    myRouter.HandleFunc("/video/{uuid}", uploadNewVideo).Methods("POST")
+    
+    log.Println("listen on", addr)
     log.Fatal(http.ListenAndServe(":10000", myRouter))
 }
 
 func main() {
-    Articles = []Article{
-        Article{Id: "1", Title: "Hello", Desc: "Article Description", Content: "Article Content"},
-        Article{Id: "2", Title: "Hello 2", Desc: "Article Description", Content: "Article Content"},
-    }
     handleRequests()
 }
